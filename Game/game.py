@@ -6,6 +6,13 @@ with contextlib.redirect_stdout(None):
 from client import Network
 import random
 import os
+from multiprocessing import Process,Pipe
+
+def send_data(child_conn, data):
+	child_conn.send(data)
+	child_conn.close()
+
+
 pygame.font.init()
 
 # Constants
@@ -13,7 +20,7 @@ PLAYER_RADIUS = 10
 START_VEL = 9
 BALL_RADIUS = 4
 TRAP_RADIUS = 10
-
+data = []
 W, H = 1600, 830
 
 NAME_FONT = pygame.font.SysFont("comicsans", 20)
@@ -126,6 +133,17 @@ def main(name):
 		if vel <= 1:
 			vel = 1
 
+
+		game_state = {
+			"balls": balls,
+			"traps": traps,
+			"player": player,
+			"players": players,
+		}
+
+		send_data(child_conn=child_conn,data=game_state)
+
+		print("DEBUG: Wysyłam do kolejki:", game_state.keys())
 		# get key presses
 		keys = pygame.key.get_pressed()
 
@@ -173,13 +191,9 @@ def main(name):
 	quit()
 
 
+
 # get users name
-while True:
- 	name = input("Please enter your name: ")
- 	if  0 < len(name) < 20:
- 		break
- 	else:
- 		print("Error, this name is not allowed (must be between 1 and 19 characters [inclusive])")
+name = "user"
 
 # make window start in top left hand corner
 os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (0,30)
@@ -187,6 +201,6 @@ os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (0,30)
 # setup pygame window
 WIN = pygame.display.set_mode((W,H))
 pygame.display.set_caption("Blobs")
-
-# start game
-main(name)
+if __name__ == '__main__':
+	# start game
+	main(name)
