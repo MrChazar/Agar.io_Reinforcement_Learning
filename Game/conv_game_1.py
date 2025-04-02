@@ -1,15 +1,119 @@
-# small network game that has differnt blobs
-# moving around the screen
 import contextlib
 import sys
-
-with contextlib.redirect_stdout(None):
-    import pygame
 from client import Network
+import contextlib
+import sys
 import random
 import os
-from multiprocessing import Process, Pipe
+import numpy as np
+from collections import deque
+import torch
+import torch.nn as nn
+import torch.optim as optim
+with contextlib.redirect_stdout(None):
+    import pygame
 
+
+### IMPLEMENTATION OF DEEP Q Learning MODEL
+
+# Hyperparameters
+BATCH_SIZE = 64
+GAMMA = 0.99
+EPS_START = 1.0
+EPS_END = 0.01
+EPS_DECAY = 0.995
+MEMORY_CAPACITY = 10000
+LEARNING_RATE = 0.001
+
+# Akcje: 0-lewo, 1-prawo, 2-góra, 3-dół
+NUM_ACTIONS = 4
+
+
+class DQN(nn.Module):
+    def __init__(self, input_size):
+        super(DQN, self).__init__()
+        self.fc = nn.Sequential(
+            nn.Linear(input_size, 64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, NUM_ACTIONS))
+
+    def forward(self, x):
+        return self.fc(x)
+
+class Agent:
+    def __init__(self):
+        self.memory = deque(maxlen=MEMORY_CAPACITY)
+        self.epsilon = EPS_START
+        self.model = DQN(4)  # Uproszczony stan: [x_gracza, y_gracza, najblizsza_pilka_x, najblizsza_pilka_y]
+        self.optimizer = optim.Adam(self.model.parameters(), lr=LEARNING_RATE)
+        self.criterion = nn.MSELoss()
+
+    def get_state(self, player, balls):
+        if not balls:
+            return np.array([player['x'] / W, player['y'] / H, 0, 0], dtype=np.float32)
+
+        # Znajdź najbliższą piłkę
+        closest_ball = min(balls, key=lambda b: (b[0] - player['x']) ** 2 + (b[1] - player['y']) ** 2)
+        return np.array([
+            player['x'] / W,
+            player['y'] / H,
+            closest_ball[0] / W,
+            closest_ball[1] / H
+        ], dtype=np.float32)
+
+    def remember(self, state, action, reward, next_state, done):
+        self.memory.append((state, action, reward, next_state, done))
+
+    def act(self, state):
+        if random.random() < self.epsilon:
+            return random.randint(0, NUM_ACTIONS - 1)
+
+        state_tensor = torch.FloatTensor(state).unsqueeze(0)
+        with torch.no_grad():
+            q_values = self.model(state_tensor)
+        return q_values.argmax().item()
+
+    def replay(self):
+        if len(self.memory) < BATCH_SIZE:
+            return
+
+        batch = random.sample(self.memory, BATCH_SIZE)
+        states, actions, rewards, next_states, dones = zip(*batch)
+
+        states = torch.FloatTensor(np.array(states))
+        actions = torch.LongTensor(actions)
+        rewards = torch.FloatTensor(rewards)
+        next_states = torch.FloatTensor(np.array(next_states))
+        dones = torch.FloatTensor(dones)
+
+        current_q = self.model(states).gather(1, actions.unsqueeze(1))
+        next_q = self.model(next_states).max(1)[0].detach()
+        target = rewards + (1 - dones) * GAMMA * next_q
+
+        loss = self.criterion(current_q.squeeze(), target)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        # Zmniejsz epsilon
+        self.epsilon = max(EPS_END, self.epsilon * EPS_DECAY)
+
+
+# Inicjalizacja agenta
+agent = Agent()
+
+# GAME ENV
+s_balls = []
+s_traps = []
+s_player = {}
+s_players = {}
+
+# Akcje agenta
+action = None
+
+### Game implementation
 pygame.font.init()
 
 # Constants
@@ -129,36 +233,38 @@ def main(name):
             pygame.display.update()
             pygame.time.delay(3000)  # Wait 3 seconds
             run = False
+
+        # Pobierz aktualny stan
+        state = agent.get_state(player, balls)
+
+        # Wybierz akcję
+        action = agent.act(state)
+
         vel = START_VEL - round(player["score"] / 14)
         if vel <= 1:
             vel = 1
 
-        game_state = {
-            "balls": balls,
-            "traps": traps,
-            "player": player,
-            "players": players,
-        }
+        s_balls = balls
+        s_traps = traps
+        s_player =  player
+        s_players =  {k: v for k, v in players.items() if k != current_id}
+        print(f"Stan aktualny: piłki:{s_balls}\n pułapki:{s_traps}\n gracz:{s_player}\n gracze: {s_players}\n")
+        last_score = player["score"]
 
-        print("DEBUG: Wysyłam do kolejki:", game_state.keys())
-        # get key presses
-        keys = pygame.key.get_pressed()
-
-        data = ""
         # movement based on key presses
-        if keys[pygame.K_LEFT] or keys[pygame.K_a]:
+        if action == 0:
             if player["x"] - vel - PLAYER_RADIUS - player["score"] >= 0:
                 player["x"] = player["x"] - vel
 
-        if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
+        if action == 1:
             if player["x"] + vel + PLAYER_RADIUS + player["score"] <= W:
                 player["x"] = player["x"] + vel
 
-        if keys[pygame.K_UP] or keys[pygame.K_w]:
+        if action == 2:
             if player["y"] - vel - PLAYER_RADIUS - player["score"] >= 0:
                 player["y"] = player["y"] - vel
 
-        if keys[pygame.K_DOWN] or keys[pygame.K_s]:
+        if action == 3:
             if player["y"] + vel + PLAYER_RADIUS + player["score"] <= H:
                 player["y"] = player["y"] + vel
 
@@ -166,6 +272,20 @@ def main(name):
 
         # send data to server and recieve back all players information
         balls, traps, players, game_time = server.send(data)
+
+        current_score = player["score"]
+        reward = current_score - last_score
+        last_score = current_score
+
+        # Pobierz nowy stan
+        new_state = agent.get_state(player, balls)
+
+        # Zapamiętaj doświadczenie
+        done = not player.get("alive", True)
+        agent.remember(state, action, reward, new_state, done)
+
+        # Uczenie na podstawie doświadczeń
+        agent.replay()
 
         for event in pygame.event.get():
             # if user hits red x button close window
@@ -187,7 +307,7 @@ def main(name):
 
 
 # get users name
-name = "user"
+name = "user_1"
 
 # make window start in top left hand corner
 os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (0, 30)
@@ -195,6 +315,7 @@ os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (0, 30)
 # setup pygame window
 WIN = pygame.display.set_mode((W, H))
 pygame.display.set_caption("Blobs")
+
 if __name__ == "__main__":
 	if len(sys.argv) > 1:
 		main(sys.argv[1])

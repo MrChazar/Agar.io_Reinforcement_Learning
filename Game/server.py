@@ -25,7 +25,7 @@ ROUND_TIME = 60 * 10
 
 MASS_LOSS_TIME = 7
 
-W, H = 1920, 1080
+W, H = 1600, 830
 
 HOST_NAME = socket.gethostname()
 SERVER_IP = socket.gethostbyname(HOST_NAME)
@@ -284,8 +284,7 @@ def threaded_client(conn, _id):
 				if start:
 					check_collision_balls(players, balls)
 					check_collision_traps(players, traps)
-
-					(players)
+					player_collision(players)
 
 				# if the amount of balls is less than 150 create more
 				if len(balls) < 150:
