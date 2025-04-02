@@ -14,21 +14,23 @@ with contextlib.redirect_stdout(None):
     import pygame
 
 
-### IMPLEMENTATION OF DEEP Q Learning MODEL
+### implementacja modelu
 
-# Hyperparameters
-BATCH_SIZE = 64
-GAMMA = 0.99
-EPS_START = 1.0
-EPS_END = 0.01
-EPS_DECAY = 0.995
-MEMORY_CAPACITY = 10000
+# hiperparametry
+BATCH_SIZE = 64        # Rozmiar batcha do treningu
+GAMMA = 0.99           # Współczynnik dyskontowania przyszłych nagród
+EPS_START = 1.0        # Początkowa wartość epsilon (eksploracja)
+EPS_END = 0.01         # Minimalna wartość epsilon
+EPS_DECAY = 0.995      # Współczynnik zmniejszania epsilon
+MEMORY_CAPACITY = 10000 # Pojemność pamięci doświadczeń
 LEARNING_RATE = 0.001
+NUM_ACTIONS = 4
 
 # Akcje: 0-lewo, 1-prawo, 2-góra, 3-dół
 NUM_ACTIONS = 4
 
 
+# Model który na podstawie stanu podejmuje akcje
 class DQN(nn.Module):
     def __init__(self, input_size):
         super(DQN, self).__init__()
@@ -42,35 +44,51 @@ class DQN(nn.Module):
     def forward(self, x):
         return self.fc(x)
 
+# definicja agenta
 class Agent:
     def __init__(self):
         self.memory = deque(maxlen=MEMORY_CAPACITY)
         self.epsilon = EPS_START
-        self.model = DQN(4)  # Uproszczony stan: [x_gracza, y_gracza, najblizsza_pilka_x, najblizsza_pilka_y]
+        self.model = DQN(6)  # Uproszczony stan: [x_gracza, y_gracza, najblizsza_pilka_x, najblizsza_pilka_y, najblizsza_pulapka_x, najblizsza_pulapka_y]
         self.optimizer = optim.Adam(self.model.parameters(), lr=LEARNING_RATE)
         self.criterion = nn.MSELoss()
 
-    def get_state(self, player, balls):
+    # pobieranie stanu gry
+    def get_state(self, player, balls, traps, players):
         if not balls:
+            return np.array([player['x'] / W, player['y'] / H, 0, 0], dtype=np.float32)
+
+        if not players:
             return np.array([player['x'] / W, player['y'] / H, 0, 0], dtype=np.float32)
 
         # Znajdź najbliższą piłkę
         closest_ball = min(balls, key=lambda b: (b[0] - player['x']) ** 2 + (b[1] - player['y']) ** 2)
+        closest_trap = min(traps, key=lambda t: (t[0] - player['x']) ** 2 + (t[1] - player['y']) ** 2)
+        #closest_player = min(players, key=lambda p: (p['x'] - player['x']) ** 2 + (p['y'] - player['y']) ** 2)
         return np.array([
             player['x'] / W,
             player['y'] / H,
             closest_ball[0] / W,
-            closest_ball[1] / H
+            closest_ball[1] / H,
+            closest_trap[0] / W,
+            closest_trap[1] / H,
+           # closest_player[0] / W,
+            #closest_player[1] / H
         ], dtype=np.float32)
 
+
+    # zapisuje stan do późniejszego uczenia
     def remember(self, state, action, reward, next_state, done):
         self.memory.append((state, action, reward, next_state, done))
 
+    # działaj jeśli random jest mniejsze to eksploruje
     def act(self, state):
         if random.random() < self.epsilon:
             return random.randint(0, NUM_ACTIONS - 1)
 
         state_tensor = torch.FloatTensor(state).unsqueeze(0)
+
+        # chwilowe wyłączenie gradientu by przyśpieszyć
         with torch.no_grad():
             q_values = self.model(state_tensor)
         return q_values.argmax().item()
@@ -234,8 +252,13 @@ def main(name):
             pygame.time.delay(3000)  # Wait 3 seconds
             run = False
 
+        s_balls = balls
+        s_traps = traps
+        s_player = player
+        s_players = {k: v for k, v in players.items() if k != current_id}
+
         # Pobierz aktualny stan
-        state = agent.get_state(player, balls)
+        state = agent.get_state(player, balls, traps, s_players)
 
         # Wybierz akcję
         action = agent.act(state)
@@ -244,10 +267,7 @@ def main(name):
         if vel <= 1:
             vel = 1
 
-        s_balls = balls
-        s_traps = traps
-        s_player =  player
-        s_players =  {k: v for k, v in players.items() if k != current_id}
+
         print(f"Stan aktualny: piłki:{s_balls}\n pułapki:{s_traps}\n gracz:{s_player}\n gracze: {s_players}\n")
         last_score = player["score"]
 
@@ -272,13 +292,14 @@ def main(name):
 
         # send data to server and recieve back all players information
         balls, traps, players, game_time = server.send(data)
+        s_players = {k: v for k, v in players.items() if k != current_id}
 
         current_score = player["score"]
         reward = current_score - last_score
         last_score = current_score
 
         # Pobierz nowy stan
-        new_state = agent.get_state(player, balls)
+        new_state = agent.get_state(player, balls, traps, s_players)
 
         # Zapamiętaj doświadczenie
         done = not player.get("alive", True)
