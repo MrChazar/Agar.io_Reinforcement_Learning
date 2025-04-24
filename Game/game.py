@@ -18,7 +18,7 @@ START_VEL = 9
 BALL_RADIUS = 4
 TRAP_RADIUS = 10
 data = []
-W, H = 1600, 830
+W, H = 1280, 720
 
 NAME_FONT = pygame.font.SysFont("comicsans", 20)
 TIME_FONT = pygame.font.SysFont("comicsans", 30)

@@ -4,6 +4,7 @@ main server script for running agar.io server
 can handle multiple/infinite connections on the same
 local network
 """
+
 import socket
 from _thread import *
 import _pickle as pickle
@@ -21,11 +22,10 @@ PORT = 5555
 BALL_RADIUS = 5
 START_RADIUS = 15
 
-ROUND_TIME = 60 * 10
+ROUND_TIME = 30
 
 MASS_LOSS_TIME = 7
-
-W, H = 1600, 830
+W, H = 1280, 720
 
 HOST_NAME = socket.gethostname()
 SERVER_IP = socket.gethostbyname(HOST_NAME)
@@ -47,6 +47,7 @@ players = {}
 balls = []
 traps = []
 connections = 0
+episodes_count = 10
 _id = 0
 colors = [(255,0,0), (255, 128, 0), (255,255,0), (128,255,0),(0,255,0),(0,255,128),(0,255,255),(0, 128, 255), (0,0,255), (0,0,255), (128,0,255),(255,0,255), (255,0,128),(128,128,128)]
 start = False
@@ -54,6 +55,30 @@ stat_time = 0
 game_time = "Starting Soon"
 nxt = 1
 
+
+
+def reset_game():
+	global players, balls, traps, start, start_time, game_time, nxt, episodes_count
+	print(f"[GAME] Resetting game. Starting episode {episodes_count + 1}")
+
+	# Reset all players
+	for pid in players:
+		players[pid]["score"] = 0
+		players[pid]["x"], players[pid]["y"] = get_start_location(players)
+		players[pid]["alive"] = True
+
+	# Clear and recreate balls and traps
+	balls.clear()
+	traps.clear()
+	create_balls(balls, random.randrange(200, 250))
+	create_traps(traps, random.randrange(10, 15))
+
+	# Reset time and flags
+	start = True
+	start_time = time.time()
+	game_time = 0
+	nxt = 1
+	episodes_count -= 1
 
 # FUNCTIONS
 def release_mass(players):
@@ -224,7 +249,7 @@ def threaded_client(conn, _id):
 	:param _id: int
 	:return: None
 	"""
-	global connections, players, balls, traps, game_time, nxt, start
+	global connections, players, balls, traps, game_time, nxt, start, episodes_count
 
 	current_id = _id
 
@@ -236,7 +261,7 @@ def threaded_client(conn, _id):
 	# Setup properties for each new player
 	color = colors[current_id]
 	x, y = get_start_location(players)
-	players[current_id] = {"x":x, "y":y,"color":color,"score":0,"name":name, "alive": True}
+	players[current_id] = {"x":x, "y":y,"color":color,"score":0,"name":name, "alive": True, "episode": episodes_count}
 
 	# pickle data and send initial info to clients
 	conn.send(str.encode(str(current_id)))
@@ -254,9 +279,12 @@ def threaded_client(conn, _id):
 
 		if start:
 			game_time = round(time.time()-start_time)
+			print(f"Game-Time: {game_time}")
 			# if the game time passes the round time the game will stop
 			if game_time >= ROUND_TIME:
 				start = False
+				if episodes_count > 0:
+					reset_game()
 			else:
 				if game_time // MASS_LOSS_TIME == nxt:
 					nxt += 1
@@ -291,16 +319,16 @@ def threaded_client(conn, _id):
 					create_balls(balls, random.randrange(100,150))
 					print("[GAME] Generating more orbs")
 
-				send_data = pickle.dumps((balls,traps,players, game_time))
+				send_data = pickle.dumps((balls,traps,players, game_time, episodes_count))
 
 			elif data.split(" ")[0] == "id":
 				send_data = str.encode(str(current_id))  # if user requests id then send it
 
 			elif data.split(" ")[0] == "jump":
-				send_data = pickle.dumps((balls,traps,players, game_time))
+				send_data = pickle.dumps((balls,traps,players, game_time, episodes_count))
 			else:
 				# any other command just send back list of players
-				send_data = pickle.dumps((balls,traps,players, game_time))
+				send_data = pickle.dumps((balls,traps,players, game_time, episodes_count))
 
 			# send data back to clients
 			conn.send(send_data)
