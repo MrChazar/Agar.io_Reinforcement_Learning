@@ -81,19 +81,6 @@ def reset_game():
 	episodes_count -= 1
 
 # FUNCTIONS
-def release_mass(players):
-	"""
-	releases the mass of players
-
-	:param players: dict
-	:return: None
-	"""
-	for player in players:
-		p = players[player]
-		if p["score"] > 8:
-			p["score"] = math.floor(p["score"]*0.99)
-
-
 def check_collision_balls(players, balls):
 	"""
 	checks if any of the player have collided with any of the balls or traps
@@ -138,9 +125,9 @@ def check_collision_traps(players, traps):
 
 			dis_trap = math.sqrt((x - tx)**2 + (y-ty)**2)
 			if dis_trap <= START_RADIUS + p["score"]:
-				p["score"] = p["score"] + 0.5
+				p["score"] = p["score"] + 1
 				players[player]["score"] = 0
-				players[player]["x"], players[player]["y"] = get_start_location(players)
+				players[player]["x"], players[player]["y"] = (2000, 2000)
 				players[player]["alive"] = False
 
 
@@ -288,7 +275,6 @@ def threaded_client(conn, _id):
 			else:
 				if game_time // MASS_LOSS_TIME == nxt:
 					nxt += 1
-					release_mass(players)
 					print(f"[GAME] {name}'s Mass depleting")
 		try:
 			# Recieve data from client

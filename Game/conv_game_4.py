@@ -14,20 +14,19 @@ import pygame
 ### implementacja modelu
 
 # hiperparametry
-BATCH_SIZE = 64        # Rozmiar batcha do treningu
+BATCH_SIZE = 64        # batch size for training
 GAMMA = 0.99           # Współczynnik dyskontowania przyszłych nagród
-EPS_START = 1.0        # Początkowa wartość epsilon (eksploracja)
-EPS_END = 0.01         # Minimalna wartość epsilon
-EPS_DECAY = 0.995      # Współczynnik zmniejszania epsilon
-MEMORY_CAPACITY = 10000 # Pojemność pamięci doświadczeń
+EPS_START = 1.0        # exploration
+EPS_END = 0.01         # minimal exploration
+EPS_DECAY = 0.995      # exploration decrease factor
+MEMORY_CAPACITY = 10000 #
 LEARNING_RATE = 0.001
 NUM_ACTIONS = 4
 
-# Akcje: 0-lewo, 1-prawo, 2-góra, 3-dół
-NUM_ACTIONS = 4
 
 
-# Model który na podstawie stanu podejmuje akcje
+
+# Agent model
 class DQN(nn.Module):
     def __init__(self, input_size):
         super(DQN, self).__init__()
@@ -41,13 +40,13 @@ class DQN(nn.Module):
     def forward(self, x):
         return self.fc(x)
 
-# definicja agenta
+# Agent definition
 class Agent:
     def __init__(self):
         self.memory = deque(maxlen=MEMORY_CAPACITY)
         self.epsilon = EPS_START
-        self.model = DQN(7)  # Uproszczony stan: [x_gracza, y_gracza, najblizsza_pilka_x, najblizsza_pilka_y, najblizsza_pulapka_x, najblizsza_pulapka_y
-        #alive ]
+        self.model = DQN(7)  # our game state: [x_player, y_player, closest_ball_x, closest_ball_y, closest_trap_x, closest_trap_y
+        #player_alive ]
         self.optimizer = optim.Adam(self.model.parameters(), lr=LEARNING_RATE)
         self.criterion = nn.MSELoss()
 
@@ -81,18 +80,18 @@ class Agent:
         ], dtype=np.float32)
 
 
-    # zapisuje stan do późniejszego uczenia
+    # save state for later learning
     def remember(self, state, action, reward, next_state, done):
         self.memory.append((state, action, reward, next_state, done))
 
-    # działaj jeśli random jest mniejsze to eksploruje
+    # if random smaller explore
     def act(self, state):
         if random.random() < self.epsilon:
             return random.randint(0, NUM_ACTIONS - 1)
 
         state_tensor = torch.FloatTensor(state).unsqueeze(0)
 
-        # chwilowe wyłączenie gradientu by przyśpieszyć
+        # check what it does
         with torch.no_grad():
             q_values = self.model(state_tensor)
         return q_values.argmax().item()
@@ -131,8 +130,9 @@ s_balls = []
 s_traps = []
 s_player = {}
 s_players = {}
+last_score = 0
 
-# Akcje agenta
+# Agent action
 action = None
 
 ### Game implementation
@@ -222,9 +222,11 @@ def redraw_window(players, balls, traps, game_time, score, episodes_count):
     # draw time
     text = TIME_FONT.render("Time: " + convert_time(game_time), 1, (0, 0, 0))
     WIN.blit(text, (10, 10))
+
     # draw score
     text = TIME_FONT.render("Score: " + str(round(score)), 1, (0, 0, 0))
     WIN.blit(text, (10, 15 + text.get_height()))
+
     # draw episode
     text = TIME_FONT.render("Episode: " + str(round(episodes_count)), 1, (0, 0, 0))
     WIN.blit(text, (10, 40 + text.get_height()))
@@ -239,6 +241,7 @@ def main(name):
 	:return: None
 	"""
     global players
+    global last_score
 
     # start by connecting to the network
     server = Network()
@@ -271,10 +274,10 @@ def main(name):
         s_player = player
         s_players = {k: v for k, v in players.items() if k != current_id}
 
-        # Pobierz aktualny stan
+        # get game state
         state = agent.get_state(player, balls, traps, s_players, player.get("alive"))
 
-        # Wybierz akcję
+        # agent choose action
         action = agent.act(state)
 
         vel = START_VEL - round(player["score"] / 14)
@@ -283,24 +286,27 @@ def main(name):
 
 
         print(f"Stan aktualny: piłki:{s_balls}\n pułapki:{s_traps}\n gracz:{s_player}\n gracze: {s_players}\n")
-        last_score = player["score"]
 
-        # movement based on key presses
-        if action == 0:
-            if player["x"] - vel - PLAYER_RADIUS - player["score"] >= 0:
-                player["x"] = player["x"] - vel
+        # movement based on key presses when player alive
+        if player.get("alive"):
+            if action == 0:
+                if player["x"] - vel - PLAYER_RADIUS - player["score"] >= 0:
+                    player["x"] = player["x"] - vel
 
-        if action == 1:
-            if player["x"] + vel + PLAYER_RADIUS + player["score"] <= W:
-                player["x"] = player["x"] + vel
+            if action == 1:
+                if player["x"] + vel + PLAYER_RADIUS + player["score"] <= W:
+                    player["x"] = player["x"] + vel
 
-        if action == 2:
-            if player["y"] - vel - PLAYER_RADIUS - player["score"] >= 0:
-                player["y"] = player["y"] - vel
+            if action == 2:
+                if player["y"] - vel - PLAYER_RADIUS - player["score"] >= 0:
+                    player["y"] = player["y"] - vel
 
-        if action == 3:
-            if player["y"] + vel + PLAYER_RADIUS + player["score"] <= H:
-                player["y"] = player["y"] + vel
+            if action == 3:
+                if player["y"] + vel + PLAYER_RADIUS + player["score"] <= H:
+                    player["y"] = player["y"] + vel
+        else:
+            player["x"] = player["x"]
+            player["y"] = player["y"]
 
         data = "move " + str(player["x"]) + " " + str(player["y"])
 
@@ -310,19 +316,26 @@ def main(name):
 
         current_score = player["score"]
         reward = current_score - last_score
+
+        # for discouriging deaths
+        if player.get("alive") == False:
+            reward = -0.5
+
+        # for """handling""" episode change
+        if reward < -2:
+            reward = 0
+
+        print(f"Score: {player['score']} | Last Score: {last_score} | Reward: {reward}")
         last_score = current_score
 
         # get new state
         new_state = agent.get_state(player, balls, traps, s_players, player.get("alive"))
 
+        print(f"Model state: {new_state}")
+
         # remember experience
         done = not player.get("alive", True)
         agent.remember(state, action, reward, new_state, done)
-
-        # Learning based on experience
-        if player.get("alive") == False and episodes_count :
-            print(f"Player is dead no learning")
-            continue
 
         agent.replay()
 
@@ -336,7 +349,7 @@ def main(name):
                 if event.key == pygame.K_ESCAPE:
                     run = False
 
-        # przerysuj i aktualizuj
+        # redraw and update
         redraw_window(players, balls, traps, game_time, player["score"], episodes_count)
         pygame.display.update()
 
