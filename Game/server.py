@@ -22,10 +22,14 @@ PORT = 5555
 BALL_RADIUS = 5
 START_RADIUS = 15
 
-ROUND_TIME = 30
+ROUND_TIME = 120
 
 MASS_LOSS_TIME = 7
-W, H = 1280, 720
+
+episodes_count = 1000
+
+LOGGING = True
+W, H = 1024, 640
 
 HOST_NAME = socket.gethostname()
 SERVER_IP = socket.gethostbyname(HOST_NAME)
@@ -47,7 +51,7 @@ players = {}
 balls = []
 traps = []
 connections = 0
-episodes_count = 10
+
 _id = 0
 colors = [(255,0,0), (255, 128, 0), (255,255,0), (128,255,0),(0,255,0),(0,255,128),(0,255,255),(0, 128, 255), (0,0,255), (0,0,255), (128,0,255),(255,0,255), (255,0,128),(128,128,128)]
 start = False
@@ -61,11 +65,14 @@ def reset_game():
 	global players, balls, traps, start, start_time, game_time, nxt, episodes_count
 	print(f"[GAME] Resetting game. Starting episode {episodes_count + 1}")
 
+
 	# Reset all players
 	for pid in players:
+		print(f"PLAYER BEFORE RESET {players[pid]['x']}  {players[pid]['y']}")
 		players[pid]["score"] = 0
 		players[pid]["x"], players[pid]["y"] = get_start_location(players)
 		players[pid]["alive"] = True
+		print(f"PLAYER {pid} reset new coordinates {players[pid]['x']} {players[pid]['y']}")
 
 	# Clear and recreate balls and traps
 	balls.clear()
@@ -101,7 +108,7 @@ def check_collision_balls(players, balls):
 
 			dis_ball = math.sqrt((x - bx)**2 + (y-by)**2)
 			if dis_ball <= START_RADIUS + p["score"]:
-				p["score"] = p["score"] + 0.5
+				p["score"] = p["score"] + 1
 				balls.remove(ball)
 
 
@@ -127,7 +134,7 @@ def check_collision_traps(players, traps):
 			if dis_trap <= START_RADIUS + p["score"]:
 				p["score"] = p["score"] + 1
 				players[player]["score"] = 0
-				players[player]["x"], players[player]["y"] = (2000, 2000)
+				players[player]["x"], players[player]["y"] = get_start_location(players)
 				players[player]["alive"] = False
 
 
@@ -192,8 +199,10 @@ def create_traps(traps, n):
 	for i in range(n):
 		while True:
 			stop = True
+
 			x = random.randrange(0,W)
 			y = random.randrange(0,H)
+
 			for player in players:
 				p = players[player]
 				dis = math.sqrt((x - p["x"])**2 + (y-p["y"])**2)
@@ -215,8 +224,8 @@ def get_start_location(players):
 	"""
 	while True:
 		stop = True
-		x = random.randrange(0,W)
-		y = random.randrange(0,H)
+		x = random.randrange(0, W)
+		y = random.randrange(0, H )
 		for player in players:
 			p = players[player]
 			dis = math.sqrt((x - p["x"])**2 + (y-p["y"])**2)
@@ -266,16 +275,24 @@ def threaded_client(conn, _id):
 
 		if start:
 			game_time = round(time.time()-start_time)
-			print(f"Game-Time: {game_time}")
+
 			# if the game time passes the round time the game will stop
 			if game_time >= ROUND_TIME:
 				start = False
 				if episodes_count > 0:
 					reset_game()
+				else:
+					global LOGGING
+					LOGGING = False
 			else:
 				if game_time // MASS_LOSS_TIME == nxt:
 					nxt += 1
 					print(f"[GAME] {name}'s Mass depleting")
+
+			# checks whether all players are dead
+			all_dead = all(not players[pid]["alive"] for pid in players)
+			if all_dead:
+				reset_game()
 		try:
 			# Recieve data from client
 			data = conn.recv(32)
@@ -343,7 +360,7 @@ print("[GAME] Setting up level")
 print("[SERVER] Waiting for connections")
 
 # Keep looping to accept new connections
-while True:
+while LOGGING:
 	host, addr = S.accept()
 	print("[CONNECTION] Connected to:", addr)
 

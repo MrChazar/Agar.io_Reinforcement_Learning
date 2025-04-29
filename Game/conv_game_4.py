@@ -23,10 +23,13 @@ MEMORY_CAPACITY = 10000 #
 LEARNING_RATE = 0.001
 NUM_ACTIONS = 4
 
+# get users name
+NAME = "agent_4"
 
 
 
 # Agent model
+# remade into convolutional network
 class DQN(nn.Module):
     def __init__(self, input_size):
         super(DQN, self).__init__()
@@ -45,39 +48,68 @@ class Agent:
     def __init__(self):
         self.memory = deque(maxlen=MEMORY_CAPACITY)
         self.epsilon = EPS_START
-        self.model = DQN(7)  # our game state: [x_player, y_player, closest_ball_x, closest_ball_y, closest_trap_x, closest_trap_y
-        #player_alive ]
+        self.model = DQN(54)
+        # our game state: [x_player, y_player, alive, player_score
+        # closest_ball_x_1, closest_ball_y_1 ...closest_ball_x_10, closest_ball_y_10,
+        # closest_trap_x_1, closest_trap_y_1 ... closest_trap_x_10, closest_trap_y_10
+        # closest_player_x_1, closest_player_y_1 closest_player_edibile_1 ... closest_player_x_3, closest_player_y_3 closest_player_edibile_3  ]
         self.optimizer = optim.Adam(self.model.parameters(), lr=LEARNING_RATE)
         self.criterion = nn.MSELoss()
 
+        if os.path.isfile(f"{NAME}.pth"):
+            self.model.load_state_dict(torch.load(f"{NAME}.pth"))
+            self.model.eval()
+            print(f"Model {NAME}.pth loaded")
+        else:
+            print("No model")
+
     # pobieranie stanu gry
-    def get_state(self, player, balls, traps, players, alive):
-        if not balls:
-            return np.array([player['x'] / W, player['y'] / H, 0, 0], dtype=np.float32)
+    def get_state(self, player, balls, traps, players):
 
-        """
-        if not players:
-            return np.array([player['x'] / W, player['y'] / H, 0, 0], dtype=np.float32)
-        """
+        #4
+        state = [player['x'] / W, player['y'] / H, float(player['alive']), player['score']]
+        sorted_balls = sorted(balls, key=lambda b: (b[0] - player['x']) ** 2 + (b[1] - player['y']) ** 2)
 
-        # Znajdź najbliższą piłkę
-        closest_ball = min(balls, key=lambda b: (b[0] - player['x']) ** 2 + (b[1] - player['y']) ** 2)
-        closest_trap = min(traps, key=lambda t: (t[0] - player['x']) ** 2 + (t[1] - player['y']) ** 2)
-        #closest_player = min(players, key=lambda p: (p['x'] - player['x']) ** 2 + (p['y'] - player['y']) ** 2)
+        #20
+        for i in range(min(10, len(sorted_balls))):
+            state.extend([sorted_balls[i][0] / W, sorted_balls[i][1] / H])
 
-        #trap_distance = np.sqrt((player['x'] - closest_trap[0]) ** 2 + (player['y'] - closest_trap[1]) ** 2)
+        for i in range(10 - min(10, len(sorted_balls))):
+            state.extend([0, 0])
 
-        return np.array([
-            player['x'] / W,
-            player['y'] / H,
-            closest_ball[0] / W,
-            closest_ball[1] / H,
-            closest_trap[0] / W,
-            closest_trap[1] / H,
-            alive
-            #closest_player[0] / W,
-            #closest_player[1] / H
-        ], dtype=np.float32)
+        sorted_traps = sorted(traps, key=lambda t: (t[0] - player['x']) ** 2 + (t[1] - player['y']) ** 2)
+
+        #20
+        for i in range(min(10, len(sorted_traps))):
+            state.extend([sorted_traps[i][0] / W, sorted_traps[i][1] / H])
+
+        for i in range(10 - min(10, len(sorted_traps))):
+            state.extend([0, 0])
+
+        # 8
+        print(f"PLAYERS {player.values()}")
+        player_list = list(players.values())
+        if player_list:
+            sorted_players = sorted(player_list,
+                                    key=lambda p: (p['x'] - player['x']) ** 2 + (p['y'] - player['y']) ** 2)
+
+            for i in range(min(3, len(sorted_players))):
+                other_player = sorted_players[i]
+                state.extend([
+                    other_player['x'] / W,
+                    other_player['y'] / H,
+                    1 if other_player.get('score', 0) > player.get('score', 0) else 0 # 1 if smaller 0 if bigger
+                ])
+
+            for i in range(3 - min(3, len(sorted_players))):
+                state.extend([0, 0, 0])
+        else:
+            for i in range(3):
+                state.extend([0, 0, 0])
+
+
+        print(f"State that goes into model: {state}")
+        return np.array(state, dtype=np.float32)
 
 
     # save state for later learning
@@ -144,7 +176,7 @@ START_VEL = 9
 BALL_RADIUS = 4
 TRAP_RADIUS = 10
 data = []
-W, H = 1280, 720
+W, H = 1024, 640
 
 NAME_FONT = pygame.font.SysFont("comicsans", 20)
 TIME_FONT = pygame.font.SysFont("comicsans", 30)
@@ -153,7 +185,6 @@ SCORE_FONT = pygame.font.SysFont("comicsans", 26)
 COLORS = [(255, 0, 0), (255, 128, 0), (255, 255, 0), (128, 255, 0), (0, 255, 0), (0, 255, 128), (0, 255, 255),
           (0, 128, 255), (0, 0, 255), (0, 0, 255), (128, 0, 255), (255, 0, 255), (255, 0, 128), (128, 128, 128),
           (0, 0, 0)]
-
 # Dynamic Variables
 players = {}
 balls = []
@@ -262,7 +293,7 @@ def main(name):
             text = font.render("GAME OVER - YOU DIED", 1, (255, 0, 0))
             WIN.blit(text, (W / 2 - text.get_width() / 2, H / 2 - text.get_height() / 2))
             pygame.display.update()
-            pygame.time.delay(3000)  # Wait 3 seconds
+            redraw_window(players, balls, traps, game_time, player["score"], episodes_count)
 
         # End of training
         if episodes_count == 0:
@@ -275,7 +306,7 @@ def main(name):
         s_players = {k: v for k, v in players.items() if k != current_id}
 
         # get game state
-        state = agent.get_state(player, balls, traps, s_players, player.get("alive"))
+        state = agent.get_state(player, balls, traps, s_players)
 
         # agent choose action
         action = agent.act(state)
@@ -283,9 +314,6 @@ def main(name):
         vel = START_VEL - round(player["score"] / 14)
         if vel <= 1:
             vel = 1
-
-
-        print(f"Stan aktualny: piłki:{s_balls}\n pułapki:{s_traps}\n gracz:{s_player}\n gracze: {s_players}\n")
 
         # movement based on key presses when player alive
         if player.get("alive"):
@@ -304,9 +332,7 @@ def main(name):
             if action == 3:
                 if player["y"] + vel + PLAYER_RADIUS + player["score"] <= H:
                     player["y"] = player["y"] + vel
-        else:
-            player["x"] = player["x"]
-            player["y"] = player["y"]
+
 
         data = "move " + str(player["x"]) + " " + str(player["y"])
 
@@ -329,9 +355,8 @@ def main(name):
         last_score = current_score
 
         # get new state
-        new_state = agent.get_state(player, balls, traps, s_players, player.get("alive"))
+        new_state = agent.get_state(player, balls, traps, s_players)
 
-        print(f"Model state: {new_state}")
 
         # remember experience
         done = not player.get("alive", True)
@@ -352,14 +377,17 @@ def main(name):
         # redraw and update
         redraw_window(players, balls, traps, game_time, player["score"], episodes_count)
         pygame.display.update()
-
+    try:
+        torch.save(agent.model.state_dict(), f"{NAME}.pth")
+        print(f"Model saved")
+    except:
+        print("Error during saving")
     server.disconnect()
     pygame.quit()
     quit()
 
 
-# get users name
-name = "agent_4"
+
 
 # make window start in top left hand corner
 os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (0, 30)
@@ -372,4 +400,4 @@ if __name__ == "__main__":
 	if len(sys.argv) > 1:
 		main(sys.argv[1])
 	else:
-		main(name)
+		main(NAME)
