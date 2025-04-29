@@ -124,7 +124,7 @@ class Agent:
 
         state_tensor = torch.FloatTensor(state).unsqueeze(0)
 
-        # check what it does
+     
         with torch.no_grad():
             q_values = self.model(state_tensor)
         return q_values.argmax().item()
