@@ -10,22 +10,20 @@ import torch.nn as nn
 import torch.optim as optim
 import pygame
 
+### Model implementation
 
-### implementacja modelu
-
-# hiperparametry
-BATCH_SIZE = 64        # batch size for training
-GAMMA = 0.99           # Współczynnik dyskontowania przyszłych nagród
-EPS_START = 1.0        # exploration
-EPS_END = 0.01         # minimal exploration
-EPS_DECAY = 0.995      # exploration decrease factor
-MEMORY_CAPACITY = 10000 #
+# hyperparameters
+BATCH_SIZE = 64  # batch size for training
+GAMMA = 0.99  # prize parameter
+EPS_START = 1.0  # exploration parameter
+EPS_END = 0.01  # minimal exploration
+EPS_DECAY = 0.995  # exploration decrease factor
+MEMORY_CAPACITY = 50000  #
 LEARNING_RATE = 0.001
 NUM_ACTIONS = 4
 
 # get users name
-NAME = "agent_3"
-
+NAME = "agent_4"
 
 
 # Agent model
@@ -34,7 +32,13 @@ class DQN(nn.Module):
     def __init__(self, input_size):
         super(DQN, self).__init__()
         self.fc = nn.Sequential(
-            nn.Linear(input_size, 64),
+            nn.Linear(input_size, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
             nn.ReLU(),
             nn.Linear(64, 64),
             nn.ReLU(),
@@ -43,12 +47,13 @@ class DQN(nn.Module):
     def forward(self, x):
         return self.fc(x)
 
+
 # Agent definition
 class Agent:
     def __init__(self):
         self.memory = deque(maxlen=MEMORY_CAPACITY)
         self.epsilon = EPS_START
-        self.model = DQN(54)
+        self.model = DQN(56)
         # our game state: [x_player, y_player, alive, player_score
         # closest_ball_x_1, closest_ball_y_1 ...closest_ball_x_10, closest_ball_y_10,
         # closest_trap_x_1, closest_trap_y_1 ... closest_trap_x_10, closest_trap_y_10
@@ -66,11 +71,11 @@ class Agent:
     # pobieranie stanu gry
     def get_state(self, player, balls, traps, players):
 
-        #4
+        # 4
         state = [player['x'] / W, player['y'] / H, float(player['alive']), player['score']]
         sorted_balls = sorted(balls, key=lambda b: (b[0] - player['x']) ** 2 + (b[1] - player['y']) ** 2)
 
-        #20
+        # 20
         for i in range(min(10, len(sorted_balls))):
             state.extend([sorted_balls[i][0] / W, sorted_balls[i][1] / H])
 
@@ -79,14 +84,14 @@ class Agent:
 
         sorted_traps = sorted(traps, key=lambda t: (t[0] - player['x']) ** 2 + (t[1] - player['y']) ** 2)
 
-        #20
+        # 20
         for i in range(min(10, len(sorted_traps))):
             state.extend([sorted_traps[i][0] / W, sorted_traps[i][1] / H])
 
         for i in range(10 - min(10, len(sorted_traps))):
             state.extend([0, 0])
 
-        # 8
+        # 12
         print(f"PLAYERS {player.values()}")
         player_list = list(players.values())
         if player_list:
@@ -98,19 +103,18 @@ class Agent:
                 state.extend([
                     other_player['x'] / W,
                     other_player['y'] / H,
-                    1 if other_player.get('score', 0) > player.get('score', 0) else 0 # 1 if smaller 0 if bigger
+                    other_player['score'],
+                    1 if other_player.get('score', 0) > player.get('score', 0) else 0  # 1 if smaller 0 if bigger
                 ])
 
             for i in range(3 - min(3, len(sorted_players))):
-                state.extend([0, 0, 0])
+                state.extend([0, 0, 0, 0])
         else:
             for i in range(3):
-                state.extend([0, 0, 0])
-
+                state.extend([0, 0, 0, 0])
 
         print(f"State that goes into model: {state}")
         return np.array(state, dtype=np.float32)
-
 
     # save state for later learning
     def remember(self, state, action, reward, next_state, done):
@@ -123,13 +127,12 @@ class Agent:
 
         state_tensor = torch.FloatTensor(state).unsqueeze(0)
 
-        # check what it does
         with torch.no_grad():
             q_values = self.model(state_tensor)
         return q_values.argmax().item()
 
     def replay(self):
-        if len(self.memory) < BATCH_SIZE:
+        if len(self.memory) < BATCH_SIZE * 5:
             return
 
         batch = random.sample(self.memory, BATCH_SIZE)
@@ -333,30 +336,18 @@ def main(name):
                 if player["y"] + vel + PLAYER_RADIUS + player["score"] <= H:
                     player["y"] = player["y"] + vel
 
-
         data = "move " + str(player["x"]) + " " + str(player["y"])
 
         # send data to server and recieve back all players information
         balls, traps, players, game_time, episodes_count = server.send(data)
         s_players = {k: v for k, v in players.items() if k != current_id}
 
-        current_score = player["score"]
-        reward = current_score - last_score
-
-        # for discouriging deaths
-        if player.get("alive") == False:
-            reward = -0.5
-
-        # for """handling""" episode change
-        if reward < -2:
-            reward = 0
+        reward = player["reward"]
 
         print(f"Score: {player['score']} | Last Score: {last_score} | Reward: {reward}")
-        last_score = current_score
 
         # get new state
         new_state = agent.get_state(player, balls, traps, s_players)
-
 
         # remember experience
         done = not player.get("alive", True)
@@ -387,8 +378,6 @@ def main(name):
     quit()
 
 
-
-
 # make window start in top left hand corner
 os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (0, 30)
 
@@ -397,7 +386,7 @@ WIN = pygame.display.set_mode((W, H))
 pygame.display.set_caption("Blobs")
 
 if __name__ == "__main__":
-	if len(sys.argv) > 1:
-		main(sys.argv[1])
-	else:
-		main(NAME)
+    if len(sys.argv) > 1:
+        main(sys.argv[1])
+    else:
+        main(NAME)

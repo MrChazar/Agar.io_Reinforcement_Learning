@@ -11,15 +11,15 @@ import torch.optim as optim
 import pygame
 
 
-### implementacja modelu
+### Model implementation
 
-# hiperparametry
+# hyperparameters
 BATCH_SIZE = 64        # batch size for training
-GAMMA = 0.99           # Współczynnik dyskontowania przyszłych nagród
-EPS_START = 1.0        # exploration
+GAMMA = 0.99           # prize parameter
+EPS_START = 1.0        # exploration parameter
 EPS_END = 0.01         # minimal exploration
 EPS_DECAY = 0.995      # exploration decrease factor
-MEMORY_CAPACITY = 10000 #
+MEMORY_CAPACITY = 50000 #
 LEARNING_RATE = 0.001
 NUM_ACTIONS = 4
 
@@ -34,12 +34,17 @@ class DQN(nn.Module):
     def __init__(self, input_size):
         super(DQN, self).__init__()
         self.fc = nn.Sequential(
-            nn.Linear(input_size, 64),
+            nn.Linear(input_size, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
             nn.ReLU(),
             nn.Linear(64, 64),
             nn.ReLU(),
             nn.Linear(64, NUM_ACTIONS))
-
     def forward(self, x):
         return self.fc(x)
 
@@ -130,7 +135,7 @@ class Agent:
         return q_values.argmax().item()
 
     def replay(self):
-        if len(self.memory) < BATCH_SIZE:
+        if len(self.memory) < BATCH_SIZE*5:
             return
 
         batch = random.sample(self.memory, BATCH_SIZE)
@@ -341,22 +346,9 @@ def main(name):
         balls, traps, players, game_time, episodes_count = server.send(data)
         s_players = {k: v for k, v in players.items() if k != current_id}
 
-        current_score = player["score"]
-        reward = current_score - last_score
-
-        if (current_score - last_score) == 0:
-            reward = -0.001
-
-        # for discouriging deaths
-        if player.get("alive") == False:
-            reward = -1
-
-        # for """handling""" episode change
-        if reward < -2:
-            reward = 0
+        reward = player["reward"]
 
         print(f"Score: {player['score']} | Last Score: {last_score} | Reward: {reward}")
-        last_score = current_score
 
         # get new state
         new_state = agent.get_state(player, balls, traps, s_players)

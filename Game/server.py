@@ -70,6 +70,7 @@ def reset_game():
 	for pid in players:
 		print(f"PLAYER BEFORE RESET {players[pid]['x']}  {players[pid]['y']}")
 		players[pid]["score"] = 0
+		players[pid]["reward"] = 0.0
 		players[pid]["x"], players[pid]["y"] = get_start_location(players)
 		players[pid]["alive"] = True
 		print(f"PLAYER {pid} reset new coordinates {players[pid]['x']} {players[pid]['y']}")
@@ -109,6 +110,7 @@ def check_collision_balls(players, balls):
 			dis_ball = math.sqrt((x - bx)**2 + (y-by)**2)
 			if dis_ball <= START_RADIUS + p["score"]:
 				p["score"] = p["score"] + 1
+				p["reward"] = 2
 				balls.remove(ball)
 
 
@@ -134,6 +136,7 @@ def check_collision_traps(players, traps):
 			if dis_trap <= START_RADIUS + p["score"]:
 				p["score"] = p["score"] + 1
 				players[player]["score"] = 0
+				players[player]["reward"] = -100
 				players[player]["x"], players[player]["y"] = get_start_location(players)
 				players[player]["alive"] = False
 
@@ -157,7 +160,9 @@ def player_collision(players):
 			dis = math.sqrt((p1x - p2x)**2 + (p1y-p2y)**2)
 			if dis < players[player2]["score"] - players[player1]["score"]*0.85:
 				players[player2]["score"] = players[player2]["score"] + players[player1]["score"]
+				players[player2]["reward"] = 200
 				players[player1]["score"] = 0
+				players[player1]["reward"] = -200
 				players[player1]["alive"] = False
 				players[player1]["x"], players[player1]["y"] = get_start_location(players)
 
@@ -257,7 +262,7 @@ def threaded_client(conn, _id):
 	# Setup properties for each new player
 	color = colors[current_id]
 	x, y = get_start_location(players)
-	players[current_id] = {"x":x, "y":y,"color":color,"score":0,"name":name, "alive": True, "episode": episodes_count}
+	players[current_id] = {"x":x, "y":y,"color":color,"score":0,"name":name, "alive": True, "episode": episodes_count, "reward": 0}
 
 	# pickle data and send initial info to clients
 	conn.send(str.encode(str(current_id)))
@@ -310,6 +315,7 @@ def threaded_client(conn, _id):
 				y = int(split_data[2])
 				players[current_id]["x"] = x
 				players[current_id]["y"] = y
+				players[current_id]["reward"] = 0
 
 				# only check for collison if the game has started
 				if start:
