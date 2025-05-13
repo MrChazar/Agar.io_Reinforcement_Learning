@@ -18,7 +18,7 @@ START_VEL = 9
 BALL_RADIUS = 4
 TRAP_RADIUS = 10
 data = []
-W, H = 1280, 720
+W, H = 400, 400
 
 NAME_FONT = pygame.font.SysFont("comicsans", 20)
 TIME_FONT = pygame.font.SysFont("comicsans", 30)
@@ -28,6 +28,9 @@ COLORS = [(255, 0, 0), (255, 128, 0), (255, 255, 0), (128, 255, 0), (0, 255, 0),
           (0, 128, 255), (0, 0, 255), (0, 0, 255), (128, 0, 255), (255, 0, 255), (255, 0, 128), (128, 128, 128),
           (0, 0, 0)]
 
+# GAME ENV
+s_player = {}
+s_players = {}
 # Dynamic Variables
 players = {}
 balls = []
@@ -58,7 +61,7 @@ def convert_time(t):
         return minutes + ":" + seconds
 
 
-def redraw_window(players, balls, traps, game_time, score):
+def redraw_window(players, balls, traps, game_time, score, episodes_count):
     """
 	draws each frame
 	:return: None
@@ -75,7 +78,8 @@ def redraw_window(players, balls, traps, game_time, score):
     # draw each player in the list
     for player in sorted(players, key=lambda x: players[x]["score"]):
         p = players[player]
-        pygame.draw.circle(WIN, p["color"], (p["x"], p["y"]), PLAYER_RADIUS + round(p["score"]))
+        pygame.draw.circle(WIN, p["color"], (p["x"], p["y"]), PLAYER_RADIUS)
+
         # render and draw name for each player
         text = NAME_FONT.render(p["name"], 1, (0, 0, 0))
         WIN.blit(text, (p["x"] - text.get_width() / 2, p["y"] - text.get_height() / 2))
@@ -95,9 +99,14 @@ def redraw_window(players, balls, traps, game_time, score):
     # draw time
     text = TIME_FONT.render("Time: " + convert_time(game_time), 1, (0, 0, 0))
     WIN.blit(text, (10, 10))
+
     # draw score
     text = TIME_FONT.render("Score: " + str(round(score)), 1, (0, 0, 0))
     WIN.blit(text, (10, 15 + text.get_height()))
+
+    # draw episode
+    text = TIME_FONT.render("Episode: " + str(round(episodes_count)), 1, (0, 0, 0))
+    WIN.blit(text, (10, 40 + text.get_height()))
 
 
 def main(name):
@@ -113,7 +122,7 @@ def main(name):
     # start by connecting to the network
     server = Network()
     current_id = server.connect(name)
-    balls, traps, players, game_time = server.send("get")
+    balls, traps, players, game_time, episodes_count = server.send("get")
 
     # setup the clock, limit to 30fps
     clock = pygame.time.Clock()
@@ -122,50 +131,42 @@ def main(name):
     while run:
         clock.tick(30)  # 30 fps max
         player = players[current_id]
+
+        # Death
         if not player.get("alive", True):
             font = pygame.font.SysFont("comicsans", 50)
             text = font.render("GAME OVER - YOU DIED", 1, (255, 0, 0))
             WIN.blit(text, (W / 2 - text.get_width() / 2, H / 2 - text.get_height() / 2))
             pygame.display.update()
-            pygame.time.delay(3000)  # Wait 3 seconds
-            run = False
+            redraw_window(players, balls, traps, game_time, player["score"], episodes_count)
+
         vel = START_VEL - round(player["score"] / 14)
         if vel <= 1:
             vel = 1
 
-        game_state = {
-            "balls": balls,
-            "traps": traps,
-            "player": player,
-            "players": players,
-        }
-
-        print("DEBUG: Wysyłam do kolejki:", game_state.keys())
         # get key presses
         keys = pygame.key.get_pressed()
 
-        data = ""
-        # movement based on key presses
         if keys[pygame.K_LEFT] or keys[pygame.K_a]:
-            if player["x"] - vel - PLAYER_RADIUS - player["score"] >= 0:
+            if player["x"] - vel  >= 0:
                 player["x"] = player["x"] - vel
 
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-            if player["x"] + vel + PLAYER_RADIUS + player["score"] <= W:
+            if player["x"] + vel <= W:
                 player["x"] = player["x"] + vel
 
         if keys[pygame.K_UP] or keys[pygame.K_w]:
-            if player["y"] - vel - PLAYER_RADIUS - player["score"] >= 0:
+            if player["y"] - vel >= 0:
                 player["y"] = player["y"] - vel
 
         if keys[pygame.K_DOWN] or keys[pygame.K_s]:
-            if player["y"] + vel + PLAYER_RADIUS + player["score"] <= H:
+            if player["y"] + vel <= H:
                 player["y"] = player["y"] + vel
 
         data = "move " + str(player["x"]) + " " + str(player["y"])
 
         # send data to server and recieve back all players information
-        balls, traps, players, game_time = server.send(data)
+        balls, traps, players, game_time, episodes_count = server.send(data)
 
         for event in pygame.event.get():
             # if user hits red x button close window
@@ -178,7 +179,7 @@ def main(name):
                     run = False
 
         # redraw window then update the frame
-        redraw_window(players, balls, traps, game_time, player["score"])
+        redraw_window(players, balls, traps, game_time, player["score"], episodes_count)
         pygame.display.update()
 
     server.disconnect()
