@@ -188,7 +188,7 @@ def main(name):
 
 
 # get users name
-name = "user"
+name = "agent"
 
 # make window start in top left hand corner
 os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (0, 30)

@@ -18,11 +18,11 @@ S.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 # Set constants
 PORT = 5555
 START_RADIUS = 15
-BIG_RADIUS = 25
-BIGGER_RADIUS = 35
-ROUND_TIME = 10
+BIG_RADIUS = 35
+BIGGER_RADIUS = 45
+ROUND_TIME = 600
 MASS_LOSS_TIME = 7
-episodes_count = 1000
+episodes_count = 5000
 LOGGING = True
 W, H = 300, 300
 
@@ -49,7 +49,7 @@ connections = 0
 _id = 0
 colors = [(255,0,0), (255, 128, 0), (255,255,0), (128,255,0),(0,255,0),(0,255,128),(0,255,255),(0, 128, 255), (0,0,255), (0,0,255), (128,0,255),(255,0,255), (255,0,128),(128,128,128)]
 start = False
-game_time = "Starting Soon"
+game_time = 0
 nxt = 1
 
 
@@ -103,7 +103,7 @@ def check_collision_balls(players, balls):
 
 			if dis_ball <= START_RADIUS:
 				p["score"] = p["score"] + 1
-				p["reward"] = 2
+				p["reward"] = 1
 				balls.remove(ball)
 
 
@@ -127,19 +127,33 @@ def check_collision_traps(players, traps):
 
 			dis_trap = math.sqrt((x - tx)**2 + (y-ty)**2)
 
-			if dis_trap <= BIGGER_RADIUS+10:
+			if dis_trap <= BIGGER_RADIUS:
+				players[player]["reward"] = -0.001
+
+			if dis_trap <= BIG_RADIUS:
 				players[player]["reward"] = -0.01
 
-			if dis_trap <= BIG_RADIUS+10:
-				players[player]["reward"] = -0.1
-
 			if dis_trap <= START_RADIUS:
-				p["score"] = p["score"] + 1
 				players[player]["score"] = 0
-				players[player]["reward"] = -5
+				players[player]["reward"] = -10
 				players[player]["x"], players[player]["y"] = get_start_location(players)
 				players[player]["alive"] = False
 				continue
+
+def walls_collision(players):
+	"""
+	checks if any of the player have encountered walls
+
+	:param players: a dictonary of players
+	:return: None
+	"""
+	for player in players:
+		is_at_left_wall = True if players[player]['x'] == 0 else False
+		is_at_right_wall = True if players[player]['x'] == W else False
+		is_at_top_wall = True if players[player]['y'] == 0 else False
+		is_at_bottom_wall = True if players[player]['y'] == H else False
+		if is_at_left_wall or is_at_right_wall or is_at_top_wall or is_at_bottom_wall:
+			players[player]["reward"] = -0.001
 
 
 def player_collision(players):
@@ -318,6 +332,7 @@ def threaded_client(conn, _id):
 					check_collision_balls(players, balls)
 					check_collision_traps(players, traps)
 					player_collision(players)
+					walls_collision(players)
 					if game_time >= ROUND_TIME-1:
 						for player in players:
 							players[player]["alive"] = False
@@ -359,7 +374,7 @@ def threaded_client(conn, _id):
 
 # setup level with balls
 create_balls(balls, random.randrange(200,250))
-create_traps(traps, random.randrange(10,15))
+create_traps(traps, 15)
 
 print("[GAME] Setting up level")
 print("[SERVER] Waiting for connections")

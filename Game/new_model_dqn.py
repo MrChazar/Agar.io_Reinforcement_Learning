@@ -2,7 +2,6 @@ import contextlib
 import sys
 import asyncio
 import platform
-import os
 import pygame
 from client import Network
 import random
@@ -19,13 +18,12 @@ with contextlib.redirect_stdout(None):
     import pygame
 
 # Constants
-PLAYER_RADIUS = 15
+PLAYER_RADIUS = 10
 START_VEL = 9
 BALL_RADIUS = 4
 TRAP_RADIUS = 10
 W, H = 300, 300  # Match server dimensions
-FPS = 30
-MODEL_NAME = "dqn_agent"
+FPS = 3000
 
 # Pygame setup
 pygame.font.init()
@@ -89,20 +87,7 @@ N_OBSERVATIONS = 86  # From get_state: 4 (player) + 40 (balls) + 30 (traps) + 12
 # Initialize models
 policy_net = DQN(N_OBSERVATIONS, N_ACTIONS).to(device)
 target_net = DQN(N_OBSERVATIONS, N_ACTIONS).to(device)
-
-# Check if model weights exist and load them automatically
-weights_loaded = False
-if platform.system() != "Emscripten" and os.path.exists(f"{MODEL_NAME}.pth"):
-    try:
-        policy_net.load_state_dict(torch.load(f"{MODEL_NAME}.pth"))
-        target_net.load_state_dict(policy_net.state_dict())
-        print(f"[INIT] Loaded existing model weights from {MODEL_NAME}.pth")
-        weights_loaded = True
-    except Exception as e:
-        print(f"[INIT ERROR] Could not load weights: {e}")
-
-if not weights_loaded:
-    target_net.load_state_dict(policy_net.state_dict())
+target_net.load_state_dict(policy_net.state_dict())
 policy_net.train()
 
 optimizer = optim.AdamW(policy_net.parameters(), lr=LR, amsgrad=True)
@@ -149,18 +134,17 @@ def optimize_model():
     torch.nn.utils.clip_grad_value_(policy_net.parameters(), 100)
     optimizer.step()
 
-def save_model():
-    if platform.system() != "Emscripten":
-        torch.save(policy_net.state_dict(), f"{MODEL_NAME}.pth")
-    print(f"[SAVE] Model weights saved to {MODEL_NAME}.pth")
+def save_model(episode):
+    # In Pyodide, we avoid local file I/O; simulate saving by storing in memory or logging
+    torch.save(policy_net.state_dict(), f'model_weights_episode_{episode}.pth')
+    print(f"[SAVE] Model weights would be saved for episode {episode}")
 
-def load_model():
+def load_model(episode):
     try:
-        if platform.system() != "Emscripten":
-            policy_net.load_state_dict(torch.load(f"{MODEL_NAME}.pth"))
-            target_net.load_state_dict(policy_net.state_dict())
-            policy_net.eval()
-        print(f"[LOAD] Model weights loaded from {MODEL_NAME}.pth")
+        # For local execution, load weights
+        policy_net.load_state_dict(torch.load(f'model_weights_episode_{episode}.pth'))
+        policy_net.eval()
+        print(f"[LOAD] Model weights would be loaded for episode {episode}")
         return True
     except Exception as e:
         print(f"[LOAD ERROR] Could not load weights: {e}")
@@ -258,21 +242,18 @@ def redraw_window(players, balls, traps, game_time, score, episodes_count):
     text = TIME_FONT.render("Episode: " + str(round(episodes_count)), 1, (0, 0, 0))
     WIN.blit(text, (10, 40 + text.get_height()))
 
-async def main(name, load_model_flag=False):
+async def main(name, load_episode="956"):
     server = Network()
     current_id = server.connect(name)
     balls, traps, players, game_time, episodes_count = server.send("get")
     clock = pygame.time.Clock()
 
-    # Override auto-loaded weights if load_model_flag is explicitly set
-    if load_model_flag and not weights_loaded:
-        if load_model():
+    if load_episode is not None:
+        if load_model(load_episode):
+            policy_net.eval()
             global EPS_START, EPS_END
             EPS_START = 0.0
             EPS_END = 0.0  # Disable exploration for testing
-    elif weights_loaded and not load_model_flag:
-        # If weights were auto-loaded and not in test mode, keep training
-        policy_net.train()
 
     prev_episode = episodes_count
     total_reward = 0
@@ -305,7 +286,7 @@ async def main(name, load_model_flag=False):
             new_y += vel
 
         # Penalize staying in place
-        reward = player["reward"]  # Reward from server (e.g., -0.01/-0.1 near traps)
+        reward = player["reward"]
         if last_pos == (new_x, new_y) and alive:
             reward -= 0.01
         last_pos = (new_x, new_y)
@@ -318,8 +299,8 @@ async def main(name, load_model_flag=False):
         reward = torch.tensor([reward], device=device, dtype=torch.float)
         total_reward += reward.item()
 
-        # Store transition and optimize (during episode)
-        if not load_model_flag:
+        # Store transition
+        if not load_episode:
             memory.push(state, action, next_state, reward)
             optimize_model()
 
@@ -337,8 +318,8 @@ async def main(name, load_model_flag=False):
             print(f"[EPISODE {prev_episode}] Duration: {game_time}, Total Reward: {total_reward}")
             total_reward = 0
             plot_durations()
-            if not load_model_flag and prev_episode % 10 == 0:
-                save_model()
+            if not load_episode and prev_episode % 10 == 0:
+                save_model(prev_episode)
             prev_episode = episodes_count
 
         # Handle game over
@@ -354,9 +335,8 @@ async def main(name, load_model_flag=False):
         # Handle events
         for event in pygame.event.get():
             if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
-                if not load_model_flag:
-                    save_model()  # Save model before exiting
                 server.disconnect()
+                save_model("956")
                 plot_durations(show_result=True)
                 pygame.quit()
                 return
@@ -367,7 +347,4 @@ if platform.system() == "Emscripten":
     asyncio.ensure_future(main("DQN_Agent"))
 else:
     if __name__ == "__main__":
-        if len(sys.argv) > 1:
-            asyncio.run(main(sys.argv[1]))
-        else:
-            asyncio.run(main("DQN_Agent"))
+        asyncio.run(main("DQN_Agent"))
