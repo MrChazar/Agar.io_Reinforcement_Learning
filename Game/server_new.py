@@ -20,7 +20,8 @@ PORT = 5555
 START_RADIUS = 15
 BIG_RADIUS = 35
 BIGGER_RADIUS = 45
-ROUND_TIME = 600
+ROUND_TIME = 120
+END_SCORE = 50
 MASS_LOSS_TIME = 7
 episodes_count = 5000
 LOGGING = True
@@ -55,7 +56,7 @@ nxt = 1
 
 
 def reset_game():
-	global players, balls, traps, start, start_time, game_time, nxt, episodes_count
+	global players, balls, traps, start, start_time, game_time, nxt, episodes_count, ROUND_TIME
 	print(f"[GAME] Resetting game. Starting episode {episodes_count + 1}")
 
 	# Reset all players
@@ -71,7 +72,7 @@ def reset_game():
 	balls.clear()
 	traps.clear()
 	create_balls(balls, 200)
-	create_traps(traps, 15)
+	create_traps(traps, random.randrange(5, 15))
 
 	# Reset time and flags
 	start = True
@@ -79,6 +80,8 @@ def reset_game():
 	game_time = 0
 	nxt = 1
 	episodes_count -= 1
+
+
 
 # FUNCTIONS
 def check_collision_balls(players, balls):
@@ -103,7 +106,7 @@ def check_collision_balls(players, balls):
 
 			if dis_ball <= START_RADIUS:
 				p["score"] = p["score"] + 1
-				p["reward"] = 1
+				p["reward"] += 1
 				balls.remove(ball)
 
 
@@ -119,7 +122,7 @@ def check_collision_traps(players, traps):
 		p = players[player]
 		x = p["x"]
 		y = p["y"]
-		for ball,trap in zip(balls, traps):
+		for trap in traps:
 
 			# trap coordinates
 			tx = trap[0]
@@ -128,14 +131,14 @@ def check_collision_traps(players, traps):
 			dis_trap = math.sqrt((x - tx)**2 + (y-ty)**2)
 
 			if dis_trap <= BIGGER_RADIUS:
-				players[player]["reward"] = -0.001
+				players[player]["reward"] += -0.01
 
 			if dis_trap <= BIG_RADIUS:
-				players[player]["reward"] = -0.01
+				players[player]["reward"] += -0.1
 
 			if dis_trap <= START_RADIUS:
 				players[player]["score"] = 0
-				players[player]["reward"] = -10
+				players[player]["reward"] = -150
 				players[player]["x"], players[player]["y"] = get_start_location(players)
 				players[player]["alive"] = False
 				continue
@@ -153,7 +156,20 @@ def walls_collision(players):
 		is_at_top_wall = True if players[player]['y'] == 0 else False
 		is_at_bottom_wall = True if players[player]['y'] == H else False
 		if is_at_left_wall or is_at_right_wall or is_at_top_wall or is_at_bottom_wall:
-			players[player]["reward"] = -0.001
+			players[player]["reward"] += -0.001
+
+
+def end_game(players):
+	"""
+	checks if any player won the game
+
+	:param players: a dictonary of players
+	:return: None
+	"""
+	for player in players:
+		if players[player]["score"] >= END_SCORE:
+			players[player]["reward"] = 100
+			players[player]["alive"] = False
 
 
 def player_collision(players):
@@ -177,17 +193,17 @@ def player_collision(players):
 			if dis <  START_RADIUS:
 				if players[player2]["score"] > players[player1]["score"]:
 					players[player2]["score"] = players[player2]["score"] + players[player1]["score"]
-					players[player2]["reward"] = 20
+					players[player2]["reward"] += 20
 					players[player1]["score"] = 0
-					players[player1]["reward"] = -20
+					players[player1]["reward"] = -2000
 					players[player1]["alive"] = False
 					players[player1]["x"], players[player1]["y"] = get_start_location(players)
 					print(f"[GAME] " + players[player2]["name"] + " ATE " + players[player1]["name"])
 				elif players[player1]["score"] > players[player2]["score"]:
 					players[player2]["score"] = players[player1]["score"] + players[player2]["score"]
-					players[player1]["reward"] = 20
+					players[player1]["reward"] += 20
 					players[player2]["score"] = 0
-					players[player2]["reward"] = -20
+					players[player2]["reward"] = -2000
 					players[player2]["alive"] = False
 					players[player2]["x"], players[player2]["y"] = get_start_location(players)
 					print(f"[GAME] " + players[player2]["name"] + " ATE " + players[player1]["name"])
@@ -333,7 +349,8 @@ def threaded_client(conn, _id):
 					check_collision_traps(players, traps)
 					player_collision(players)
 					walls_collision(players)
-					if game_time >= ROUND_TIME-1:
+					end_game(players)
+					if game_time >= ROUND_TIME:
 						for player in players:
 							players[player]["alive"] = False
 
@@ -374,7 +391,7 @@ def threaded_client(conn, _id):
 
 # setup level with balls
 create_balls(balls, random.randrange(200,250))
-create_traps(traps, 15)
+create_traps(traps, random.randrange(5, 15))
 
 print("[GAME] Setting up level")
 print("[SERVER] Waiting for connections")

@@ -16,26 +16,36 @@ with contextlib.redirect_stdout(None):
 from client import Network
 
 # Constants
-PLAYER_RADIUS = 10
+PLAYER_RADIUS = 15
 START_VEL = 9
 BALL_RADIUS = 4
 TRAP_RADIUS = 10
 W, H = 300, 300
 SAVE_INTERVAL = 100  # Save weights every 20 episodes
+polyak = 0.995
 
 #Model
 class DQN(nn.Module):
-    def __init__(self, in_states, h1_nodes, out_actions):
+    def __init__(self, input_dim, hidden, n_actions):
         super().__init__()
-        self.fc1 = nn.Linear(in_states, h1_nodes)
-        self.fc2 = nn.Linear(h1_nodes, h1_nodes // 2)
-        self.fc3 = nn.Linear(h1_nodes // 2, h1_nodes // 4)
-        self.out = nn.Linear(h1_nodes // 4, out_actions)
+        self.fc1 = nn.Linear(input_dim, hidden)
+        self.bn1 = nn.BatchNorm1d(hidden)
+
+        self.fc2 = nn.Linear(hidden, hidden // 2)
+        self.bn2 = nn.BatchNorm1d(hidden // 2)
+
+        self.fc3 = nn.Linear(hidden // 2, hidden // 4)
+        self.bn3 = nn.BatchNorm1d(hidden // 4)
+
+        self.out = nn.Linear(hidden // 4, n_actions)
 
     def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
+        x = F.relu(self.bn1(self.fc1(x)))
+
+        x = F.relu(self.bn2(self.fc2(x)))
+
+        x = F.relu(self.bn3(self.fc3(x)))
+
         return self.out(x)
 
 # Define memory for Experience Replay
@@ -61,12 +71,12 @@ class Agent:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Hyperparameters
-        self.learning_rate = 0.001
+        self.learning_rate = 1e-3
         self.gamma = 0.99
         self.epsilon = 1.0
         self.epsilon_min = 0.01
-        self.epsilon_decay = 0.99999
-        self.batch_size = 128
+        self.epsilon_decay = 0.99991
+        self.batch_size = 192
         self.memory = ReplayMemory(25000)
         self.update_target_every = 10
 
@@ -76,7 +86,7 @@ class Agent:
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
 
-        self.optimizer = torch.optim.Adam(self.policy_net.parameters(), lr=self.learning_rate)
+        self.optimizer = torch.optim.Adam(self.policy_net.parameters(),  lr=self.learning_rate, weight_decay=1e-5)
         self.loss_fn = nn.MSELoss()
 
         self.steps = 0
@@ -97,21 +107,21 @@ class Agent:
             is_at_top_wall,
             is_at_bottom_wall,
             float(player['alive']),
-            player['score'] / 100.0,
-            (START_VEL - round(player["score"] / 14)) / START_VEL
+            (START_VEL - round(player["score"] / 14)) / START_VEL,
+            player["score"] / 50
         ]
 
         # Add closest balls
         sorted_balls = sorted(balls, key=lambda b: (b[0] - player['x']) ** 2 + (b[1] - player['y']) ** 2)
         for i in range(min(60, len(sorted_balls))):
-            state.extend([sorted_balls[i][0] / W, sorted_balls[i][1] / H])
+            state.extend([(sorted_balls[i][0] - player['x'])/ W, (sorted_balls[i][1] - player['y']) / H])
         for i in range(60 - min(60, len(sorted_balls))):
             state.extend([0, 0])
 
         # Add closest traps
         sorted_traps = sorted(traps, key=lambda t: (t[0] - player['x']) ** 2 + (t[1] - player['y']) ** 2)
         for i in range(min(15, len(sorted_traps))):
-            state.extend([sorted_traps[i][0] / W, sorted_traps[i][1] / H])
+            state.extend([(sorted_traps[i][0] - player['x']) / W, (sorted_traps[i][1] - player['y'])/ H])
         for i in range(15 - min(15, len(sorted_traps))):
             state.extend([0, 0])
 
@@ -123,9 +133,9 @@ class Agent:
             for i in range(min(3, len(sorted_players))):
                 other_player = sorted_players[i]
                 state.extend([
-                    other_player['x'] / W,
-                    other_player['y'] / H,
-                    other_player['score'] / 100.0,
+                    (other_player['x'] - player['x']) / W,
+                    (other_player['y'] - player['y']) / H,
+                    other_player['score'] / 1000,
                     0 if other_player.get('score', 0) > player.get('score', 0) else 1
                 ])
             for i in range(3 - min(3, len(sorted_players))):
@@ -141,6 +151,7 @@ class Agent:
             return random.randint(0, self.action_size - 1)
 
         with torch.no_grad():
+            self.policy_net.eval()
             q_values = self.policy_net(state)
             return q_values.argmax().item()
 
@@ -186,7 +197,9 @@ class Agent:
         # Update target network
         self.steps += 1
         if self.steps % self.update_target_every == 0:
-            self.target_net.load_state_dict(self.policy_net.state_dict())
+            with torch.no_grad():
+                for target_param, policy_param in zip(self.target_net.parameters(), self.policy_net.parameters()):
+                    target_param.data.mul_(polyak).add_(policy_param.data, alpha=1 - polyak)
 
         return loss.item()
 
@@ -226,7 +239,7 @@ def main(name, train_mode=True, model_file=None):
     balls, traps, players, game_time, episodes_count = server.send("get")
 
     # Initialize agent
-    state_size = 9 + 60 * 2 + 15 * 2 + 3 * 4  # player + balls + traps + other players
+    state_size = 171 # player + balls + traps + other players
     action_size = 4  # Left, Right, Up, Down
     agent = Agent(state_size, action_size)
 
@@ -315,7 +328,7 @@ def main(name, train_mode=True, model_file=None):
         text = TIME_FONT.render(f"Score: {player['score']}", 1, (0, 0, 0))
         WIN.blit(text, (10, 10))
 
-        text = TIME_FONT.render(f"Episode: {episodes_count}", 1, (0, 0, 0))
+        text = TIME_FONT.render(f"Time: {game_time}", 1, (0, 0, 0))
         WIN.blit(text, (10, 40))
 
         if not train_mode:
